@@ -50,6 +50,19 @@ public class NettingRunController {
                 sumNet(result.positions()));
     }
 
+    @PostMapping("/preview")
+    public PreviewResponse preview(@Valid @RequestBody ExecuteRequest request) {
+        AuthContext.requireOperator();
+        NettingApplicationService.NettingPreviewResult result =
+                nettingService.preview(request.settleDate(), request.currency());
+        return new PreviewResponse(
+                result.settleDate(),
+                result.currency(),
+                result.positions().stream().map(PositionResponse::from).collect(Collectors.toList()),
+                result.obligations().stream().map(ObligationBrief::from).collect(Collectors.toList()),
+                sumNet(result.positions()));
+    }
+
     @GetMapping("/{id}")
     public RunDetailResponse get(@PathVariable("id") String id) {
         AuthContext.require();
@@ -137,6 +150,14 @@ public class NettingRunController {
     }
 
     public record ExecuteResponse(RunResponse run, List<PositionResponse> positions, BigDecimal sumNetAmount) {
+    }
+
+    public record PreviewResponse(
+            LocalDate settleDate,
+            String currency,
+            List<PositionResponse> positions,
+            List<ObligationBrief> obligations,
+            BigDecimal sumNetAmount) {
     }
 
     public record RunDetailResponse(

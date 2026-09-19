@@ -69,15 +69,26 @@ public class NettingApplicationService {
         return obligationRepository.findByNettingRunId(runId);
     }
 
+    /**
+     * Dry run: compute participating obligations and net positions with the exact same
+     * validation and core algorithm as {@link #execute}, but never persist a run/position
+     * and never mark obligations as NETTED.
+     */
+    @Transactional(readOnly = true)
+    public NettingPreviewResult preview(LocalDate settleDate, String currency) {
+        String ccy = normalizeAndValidate(settleDate, currency);
+        List<TradeObligation> opens = obligationRepository.findOpenBySettleDateAndCurrency(settleDate, ccy);
+        Map<String, Member> members = loadInvolvedMembers(opens);
+
+        // null runId: preview positions are transient and not bound to any persisted run.
+        List<NetPosition> positions = nettingService.net(null, ccy, opens, members);
+
+        return new NettingPreviewResult(settleDate, ccy, positions, opens);
+    }
+
     @Transactional
     public NettingRunResult execute(LocalDate settleDate, String currency) {
-        if (settleDate == null) {
-            throw new DomainException("INVALID_DATE", "settleDate is required");
-        }
-        if (currency == null || currency.isBlank()) {
-            throw new DomainException("INVALID_CURRENCY", "currency is required");
-        }
-        String ccy = currency.trim().toUpperCase();
+        String ccy = normalizeAndValidate(settleDate, currency);
 
         NettingRun run = NettingRun.create(settleDate, ccy);
         run.markRunning();
@@ -85,15 +96,7 @@ public class NettingApplicationService {
 
         try {
             List<TradeObligation> opens = obligationRepository.findOpenBySettleDateAndCurrency(settleDate, ccy);
-            Set<String> memberIds = new HashSet<>();
-            for (TradeObligation o : opens) {
-                memberIds.add(o.getPayerMemberId());
-                memberIds.add(o.getPayeeMemberId());
-            }
-            Map<String, Member> members = new HashMap<>();
-            for (Member m : memberRepository.findByIds(memberIds)) {
-                members.put(m.getMemberId(), m);
-            }
+            Map<String, Member> members = loadInvolvedMembers(opens);
 
             List<NetPosition> positions = nettingService.net(run.getRunId(), ccy, opens, members);
 
@@ -136,6 +139,36 @@ public class NettingApplicationService {
         }
         obligationRepository.saveAll(obligations);
         return run;
+    }
+
+    private String normalizeAndValidate(LocalDate settleDate, String currency) {
+        if (settleDate == null) {
+            throw new DomainException("INVALID_DATE", "settleDate is required");
+        }
+        if (currency == null || currency.isBlank()) {
+            throw new DomainException("INVALID_CURRENCY", "currency is required");
+        }
+        return currency.trim().toUpperCase();
+    }
+
+    private Map<String, Member> loadInvolvedMembers(List<TradeObligation> opens) {
+        Set<String> memberIds = new HashSet<>();
+        for (TradeObligation o : opens) {
+            memberIds.add(o.getPayerMemberId());
+            memberIds.add(o.getPayeeMemberId());
+        }
+        Map<String, Member> members = new HashMap<>();
+        for (Member m : memberRepository.findByIds(memberIds)) {
+            members.put(m.getMemberId(), m);
+        }
+        return members;
+    }
+
+    public record NettingPreviewResult(
+            LocalDate settleDate,
+            String currency,
+            List<NetPosition> positions,
+            List<TradeObligation> obligations) {
     }
 
     public record NettingRunResult(NettingRun run, List<NetPosition> positions, List<TradeObligation> obligations) {

@@ -11,8 +11,66 @@
           <el-option label="CNY" value="CNY" />
           <el-option label="EUR" value="EUR" />
         </el-select>
+        <el-button type="warning" plain :disabled="!auth.isOperator" :loading="previewing" @click="doPreview">预演</el-button>
         <el-button type="primary" :disabled="!auth.isOperator" :loading="running" @click="execute">执行轧差</el-button>
         <el-button @click="loadRuns">刷新批次</el-button>
+      </div>
+    </div>
+
+    <div v-if="previewResult" class="card-panel" style="margin-top:16px">
+      <div class="toolbar" style="justify-content:space-between">
+        <div>
+          <strong>预演结果（不落正式状态）</strong>
+          <el-tag style="margin-left:8px" type="warning">PREVIEW</el-tag>
+          <span style="margin-left:12px">ΣnetAmount = {{ previewResult.sumNetAmount }}</span>
+        </div>
+        <el-tag type="info">义务仍为 OPEN，头寸不入库</el-tag>
+      </div>
+
+      <div style="margin-top:12px">
+        <strong>将参与轧差的义务（{{ previewResult.obligations.length }} 笔）</strong>
+        <el-table :data="previewResult.obligations" stripe size="small" style="margin-top:8px">
+          <el-table-column prop="obligationId" label="义务 ID" min-width="220">
+            <template #default="{ row }"><span class="mono">{{ row.obligationId }}</span></template>
+          </el-table-column>
+          <el-table-column label="付款方" min-width="180">
+            <template #default="{ row }">
+              <span class="mono">{{ row.payerMemberId }}</span>
+              <div>{{ nameOf(row.payerMemberId) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="收款方" min-width="180">
+            <template #default="{ row }">
+              <span class="mono">{{ row.payeeMemberId }}</span>
+              <div>{{ nameOf(row.payeeMemberId) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="currency" label="币种" width="90" />
+          <el-table-column prop="amount" label="金额" min-width="140" />
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'OPEN' ? 'info' : 'danger'" size="small">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <div style="margin-top:16px">
+        <strong>预演净头寸</strong>
+        <el-table :data="previewResult.positions" stripe size="small" style="margin-top:8px">
+          <el-table-column prop="memberId" label="会员 ID" min-width="220">
+            <template #default="{ row }">
+              <span class="mono">{{ row.memberId }}</span>
+              <div>{{ nameOf(row.memberId) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="currency" label="币种" width="90" />
+          <el-table-column prop="netAmount" label="净头寸（正应收/负应付）" min-width="200" />
+        </el-table>
+      </div>
+
+      <div class="toolbar" style="margin-top:12px">
+        <el-button type="primary" :disabled="!auth.isOperator" :loading="running" @click="execute">按此条件正式执行</el-button>
       </div>
     </div>
 
@@ -66,8 +124,10 @@ const auth = useAuthStore()
 const settleDate = ref(new Date().toISOString().slice(0, 10))
 const currency = ref('USD')
 const running = ref(false)
+const previewing = ref(false)
 const loading = ref(false)
 const result = ref(null)
+const previewResult = ref(null)
 const runs = ref([])
 const memberMap = ref({})
 
@@ -86,6 +146,22 @@ async function loadRuns() {
   }
 }
 
+async function doPreview() {
+  previewing.value = true
+  try {
+    const { data } = await api.post('/netting-runs/preview', {
+      settleDate: settleDate.value,
+      currency: currency.value
+    })
+    previewResult.value = data
+    ElMessage.success(`预演完成：${data.obligations.length} 笔义务参与，义务仍保持 OPEN`)
+  } catch (e) {
+    previewResult.value = null
+  } finally {
+    previewing.value = false
+  }
+}
+
 async function execute() {
   running.value = true
   try {
@@ -94,6 +170,8 @@ async function execute() {
       currency: currency.value
     })
     result.value = data
+    // a real run supersedes any earlier dry run for the same criteria
+    previewResult.value = null
     ElMessage.success('轧差完成，守恒校验通过')
     await loadRuns()
   } catch (e) {

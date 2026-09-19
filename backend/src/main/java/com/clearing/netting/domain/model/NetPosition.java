@@ -14,7 +14,8 @@ public class NetPosition {
 
     public NetPosition(String positionId, String runId, String memberId, String currency, BigDecimal netAmount) {
         this.positionId = Objects.requireNonNull(positionId);
-        this.runId = Objects.requireNonNull(runId);
+        // runId is nullable: a dry-run preview produces net positions that are never bound to a persisted run.
+        this.runId = runId;
         this.memberId = Objects.requireNonNull(memberId);
         this.currency = Objects.requireNonNull(currency).toUpperCase();
         this.netAmount = Objects.requireNonNull(netAmount).setScale(8, RoundingMode.HALF_UP);
