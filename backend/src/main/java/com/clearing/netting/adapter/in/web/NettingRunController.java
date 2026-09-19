@@ -50,6 +50,23 @@ public class NettingRunController {
                 sumNet(result.positions()));
     }
 
+    /**
+     * Read-only rehearsal: returns the obligations that would participate (still OPEN)
+     * and the net positions that would result, without persisting anything.
+     */
+    @PostMapping("/preview")
+    public PreviewResponse preview(@Valid @RequestBody ExecuteRequest request) {
+        AuthContext.require();
+        NettingApplicationService.NettingPreviewResult result =
+                nettingService.preview(request.settleDate(), request.currency());
+        return new PreviewResponse(
+                result.settleDate(),
+                result.currency(),
+                result.obligations().stream().map(ObligationBrief::from).collect(Collectors.toList()),
+                result.positions().stream().map(PositionResponse::from).collect(Collectors.toList()),
+                sumNet(result.positions()));
+    }
+
     @GetMapping("/{id}")
     public RunDetailResponse get(@PathVariable("id") String id) {
         AuthContext.require();
@@ -137,6 +154,18 @@ public class NettingRunController {
     }
 
     public record ExecuteResponse(RunResponse run, List<PositionResponse> positions, BigDecimal sumNetAmount) {
+    }
+
+    /**
+     * Preview payload: no run is created, so obligations are returned explicitly and
+     * are all still OPEN (the caller can confirm nothing was netted).
+     */
+    public record PreviewResponse(
+            LocalDate settleDate,
+            String currency,
+            List<ObligationBrief> obligations,
+            List<PositionResponse> positions,
+            BigDecimal sumNetAmount) {
     }
 
     public record RunDetailResponse(
